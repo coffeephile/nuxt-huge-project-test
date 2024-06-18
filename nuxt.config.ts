@@ -87,6 +87,7 @@ export default defineNuxtConfig({
     preset: 'node-server',
     prerender: {
       crawlLinks: false,
+      routes: ['/', ...dynamicPages.map(p => p.path)],
       failOnError: false
     }
   },
