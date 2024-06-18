@@ -15,26 +15,39 @@ interface DynamicPage {
 }
 
 // generate dynamic pages
-const NUM_TEST_PAGES = process.env.NUXT_NUM_PAGES || 100
-console.log(`Generating ${NUM_TEST_PAGES} dynamic pages...`)
+const NUM_TEST_PAGES = process.env.NUXT_NUM_PAGES
+const numTestPages = parseInt(NUM_TEST_PAGES ?? '') || 100
+console.log(`Generating ${numTestPages} dynamic pages...`)
 
 const dynamicPages: DynamicPage[] = []
-for (let i = 0; i < NUM_TEST_PAGES; i++ ) {
+for (let i = 1; i <= numTestPages; i++ ) {
   const path = `/test/${i}/`
   const pId = path.replaceAll('/', ':')
   dynamicPages.push({
     path: path,
     file: `${PAGES_PATH}/[...slug].vue`,
     id: `${DOCS_SRC_PREFIX}${pId}index.md`,
-    content: `Test ${i}`
+    content: `
+::fixed-height-block
+
+Markdown Test Page #${i}
+
+[← Go back home](/)
+
+::
+
+::test-page-links
+::
+`
   })
 }
 
 // nuxt config
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
+  // srcDir: 'src/',
   devtools: { enabled: true },
-  appConfig: { numTestPages: NUM_TEST_PAGES },
+  appConfig: { numTestPages: `${numTestPages}` },
   hooks: {
     // add additional pages
     'nitro:init': nitro => {
@@ -49,11 +62,7 @@ export default defineNuxtConfig({
   modules: ['@nuxt/content', '@nuxt/ui'],
   content: {
     // https://content.nuxtjs.org/api/configuration
-    documentDriven: {
-      layoutFallbacks: ['default'],
-      trailingSlash: true,
-      injectPage: false
-    },
+    documentDriven: false,
     sources: {
       content: {
         driver: 'fs',
@@ -80,6 +89,16 @@ export default defineNuxtConfig({
       crawlLinks: false,
       failOnError: false
     }
+  },
+  vite: {
+    build: {
+      cssCodeSplit: true,
+      cssMinify: 'esbuild'
+    },
+    warmupEntry: false
+  },
+  colorMode: {
+    preference: 'light'
   },
   features: {
     // avoid inline CSS rendering, massively reducing HTML file sizes

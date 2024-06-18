@@ -1,14 +1,18 @@
-<script setup lang="ts">
-const numTestPages = useAppConfig().numTestPages
-</script>
-
 <template>
   <main class="p-3">
-    <ul class="flex flex-wrap gap-3">
-      <li v-for="i in numTestPages-1" :key="i">
-        <NuxtLink :to="`/test/${i}/`">{{ i }}
-        </NuxtLink>
-      </li>
-    </ul>
+    <FixedHeightBlock>
+      Top page here!
+    </FixedHeightBlock>
+    <TestPageLinks />
   </main>
 </template>
+
+<style scoped>
+.block-link {
+  @apply transition no-underline;
+}
+
+.block-link:hover {
+  @apply opacity-80 bg-green-500 bg-opacity-30;
+}
+</style>
