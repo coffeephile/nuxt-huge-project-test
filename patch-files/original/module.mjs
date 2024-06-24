@@ -7,6 +7,7 @@ import { hash } from 'ohash';
 import { resolve, join, relative } from 'pathe';
 import { withLeadingSlash, joinURL, withTrailingSlash } from 'ufo';
 import { createStorage } from 'unstorage';
+import { makeIgnored } from '../dist/runtime/utils/config.js';
 import fsDriver from 'unstorage/drivers/fs';
 import httpDriver from 'unstorage/drivers/http';
 import githubDriver from 'unstorage/drivers/github';
@@ -14,15 +15,7 @@ import { WebSocketServer } from 'ws';
 import { consola } from 'consola';
 
 const name = "@nuxt/content";
-const version = "2.12.1";
-
-function makeIgnored(ignores) {
-  const rxAll = ["/\\.", "/-", ...ignores.filter((p) => p)].map((p) => new RegExp(p));
-  return function isIgnored(key) {
-    const path = "/" + key.replace(/:/g, "/");
-    return rxAll.some((rx) => rx.test(path));
-  };
-}
+const version = "2.13.0";
 
 const logger = consola.withTag("@nuxt/content");
 const CACHE_VERSION = 2;
@@ -71,6 +64,7 @@ async function getMountDriver(mount) {
 }
 function useContentMounts(nuxt, storages) {
   const key = (path, prefix = "") => `${MOUNT_PREFIX}${path.replace(/[/:]/g, "_")}${prefix.replace(/\//g, ":")}`;
+  const baseDir = nuxt.options.future?.compatibilityVersion === 4 ? nuxt.options.rootDir : nuxt.options.srcDir;
   const storageKeys = Object.keys(storages);
   if (Array.isArray(storages) || // Detect object representation of array `{ '0': 'source1' }`. Nuxt converts this array to object when using `nuxt.config.ts`
   storageKeys.length > 0 && storageKeys.every((i) => i === String(+i))) {
@@ -82,7 +76,7 @@ function useContentMounts(nuxt, storages) {
           name: storage,
           driver: "fs",
           prefix: "",
-          base: resolve(nuxt.options.srcDir, storage)
+          base: resolve(baseDir, storage)
         };
       }
       if (typeof storage === "object") {
@@ -101,7 +95,7 @@ function useContentMounts(nuxt, storages) {
     storages[defaultStorage] = {
       name: defaultStorage,
       driver: "fs",
-      base: resolve(nuxt.options.srcDir, "content")
+      base: resolve(baseDir, "content")
     };
   }
   return storages;
@@ -153,7 +147,7 @@ const module = defineNuxtModule({
     version,
     configKey: "content",
     compatibility: {
-      nuxt: "^3.0.0-rc.3"
+      nuxt: ">=3.0.0-rc.3"
     }
   },
   defaults: {
@@ -222,7 +216,7 @@ const module = defineNuxtModule({
     extendViteConfig((config) => {
       config.optimizeDeps = config.optimizeDeps || {};
       config.optimizeDeps.include = config.optimizeDeps.include || [];
-      config.optimizeDeps.include.push("slugify");
+      config.optimizeDeps.include.push("@nuxt/content > slugify");
       config.plugins?.push({
         name: "content-slot",
         enforce: "pre",
@@ -238,6 +232,17 @@ const module = defineNuxtModule({
               map: { mappings: "" }
             };
           }
+          if (code.includes("content-slot")) {
+            code = code.replace(/<content-slot(\s)+([^/>]*)(:use=['"](\$slots.)?([a-zA-Z0-9_-]*)['"])/g, '<MDCSlot$1$2name="$5"');
+            code = code.replace(/<\/content-slot>/g, "</MDCSlot>");
+            code = code.replace(/<content-slot/g, "<MDCSlot");
+            code = code.replace(/(['"])content-slot['"]/g, "$1MDCSlot$1");
+            code = code.replace(/content-slot\(([^(]*)(:use=['"](\$slots.)?([a-zA-Z0-9_-]*)['"]|use=['"]([a-zA-Z0-9_-]*)['"])([^)]*)/g, 'MDCSlot($1name="$4"$6');
+            return {
+              code,
+              map: { mappings: "" }
+            };
+          }
         }
       });
     });
@@ -245,6 +250,9 @@ const module = defineNuxtModule({
       nitroConfig.prerender = nitroConfig.prerender || {};
       nitroConfig.prerender.routes = nitroConfig.prerender.routes || [];
       nitroConfig.handlers = nitroConfig.handlers || [];
+      if (nitroConfig.prerender.routes.indexOf("/") === -1) {
+        nitroConfig.prerender.routes.push("/");
+      }
       nitroConfig.handlers.push(
         {
           method: "get",
@@ -334,7 +342,7 @@ const module = defineNuxtModule({
     if (options.experimental?.search) {
       const defaultSearchOptions = {
         indexed: true,
-        ignoredTags: ["style", "code"],
+        ignoredTags: ["script", "style", "pre"],
         filterQuery: { _draft: false, _partial: false },
         options: {
           fields: ["title", "content", "titles"],
@@ -501,7 +509,7 @@ const module = defineNuxtModule({
               logger.warn([
                 "Using `<NuxtLayout>` inside `app.vue` will cause unwanted layout shifting in your application.",
                 "Consider removing `<NuxtLayout>` from `app.vue` and using it in your pages."
-              ].join(""));
+              ].join(" "));
             }
           }
         });
@@ -544,9 +552,13 @@ const module = defineNuxtModule({
       }
     }
     await installModule("@nuxtjs/mdc", nuxtMDCOptions);
-    nuxt.options.runtimeConfig.public.content = defu(nuxt.options.runtimeConfig.public.content, {
+    extendViteConfig((config) => {
+      config.optimizeDeps = config.optimizeDeps || {};
+      config.optimizeDeps.include = config.optimizeDeps.include?.map((id) => id.replace(/^@nuxtjs\/mdc > /, "@nuxt/content >"));
+    });
+    const contentRuntime = defu(nuxt.options.runtimeConfig.public.content, {
       locales: options.locales,
-      defaultLocale: contentContext.defaultLocale,
+      defaultLocale: contentContext.defaultLocale || void 0,
       integrity: buildIntegrity,
       experimental: {
         stripQueryParameters: options.experimental.stripQueryParameters,
@@ -574,6 +586,7 @@ const module = defineNuxtModule({
       // @deprecated
       anchorLinks: options.markdown.anchorLinks
     });
+    nuxt.options.runtimeConfig.public.content = contentRuntime;
     nuxt.options.runtimeConfig.content = defu(nuxt.options.runtimeConfig.content, {
       cacheVersion: CACHE_VERSION,
       cacheIntegrity,
@@ -588,7 +601,7 @@ const module = defineNuxtModule({
         tailwindConfig.content.files = tailwindConfig.content.files ?? [];
         tailwindConfig.content.files.push(contentPath);
       }
-      const [tailwindCssPath] = Array.isArray(nuxt.options.tailwindcss?.cssPath) ? nuxt.options.tailwindcss?.cssPath : [nuxt.options.tailwindcss?.cssPath];
+      const [tailwindCssPath] = Array.isArray(nuxt.options.tailwindcss?.cssPath) ? nuxt.options.tailwindcss.cssPath : [nuxt.options.tailwindcss?.cssPath];
       let cssPath = tailwindCssPath ? await resolvePath(tailwindCssPath, { extensions: [".css", ".sass", ".scss", ".less", ".styl"] }) : join(nuxt.options.dir.assets, "css/tailwind.css");
       if (!fs.existsSync(cssPath)) {
         cssPath = await resolvePath("tailwindcss/tailwind.css");

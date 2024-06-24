@@ -10,15 +10,33 @@ import { getPreview, isPreview } from "./preview.js";
 import { getIndexedContentsList } from "./content-index.js";
 import { useNitroApp, useRuntimeConfig, useStorage } from "#imports";
 import { transformers as customTransformers } from "#content/virtual/transformers";
-export const sourceStorage = prefixStorage(useStorage(), "content:source");
-export const cacheStorage = prefixStorage(useStorage(), "cache:content");
-export const cacheParsedStorage = prefixStorage(useStorage(), "cache:content:parsed");
+let _sourceStorage;
+let _cacheStorage;
+let _cacheParsedStorage;
+export const sourceStorage = () => {
+  if (!_sourceStorage) {
+    _sourceStorage = prefixStorage(useStorage(), "content:source");
+  }
+  return _sourceStorage;
+};
+export const cacheStorage = () => {
+  if (!_cacheStorage) {
+    _cacheStorage = prefixStorage(useStorage(), "cache:content");
+  }
+  return _cacheStorage;
+};
+export const cacheParsedStorage = () => {
+  if (!_cacheParsedStorage) {
+    _cacheParsedStorage = prefixStorage(useStorage(), "cache:content:parsed");
+  }
+  return _cacheParsedStorage;
+};
 const isProduction = process.env.NODE_ENV === "production";
 const isPrerendering = import.meta.prerender;
-const contentConfig = useRuntimeConfig().content;
-const isIgnored = makeIgnored(contentConfig.ignores);
+const contentConfig = () => useRuntimeConfig().content;
 const invalidKeyCharacters = `'"?#/`.split("");
 const contentIgnorePredicate = (key) => {
+  const isIgnored = makeIgnored(contentConfig().ignores);
   if (key.startsWith("preview:") || isIgnored(key)) {
     return false;
   }
@@ -31,20 +49,21 @@ const contentIgnorePredicate = (key) => {
 export const getContentsIds = async (event, prefix) => {
   let keys = [];
   if (isProduction) {
-    keys = await cacheParsedStorage.getKeys(prefix);
+    keys = await cacheParsedStorage().getKeys(prefix);
   }
+  const source = sourceStorage();
   if (keys.length === 0) {
-    keys = await sourceStorage.getKeys(prefix);
+    keys = await source.getKeys(prefix);
   }
   if (isPreview(event)) {
     const { key } = getPreview(event);
     const previewPrefix = `preview:${key}:${prefix || ""}`;
-    const previewKeys = await sourceStorage.getKeys(previewPrefix);
+    const previewKeys = await source.getKeys(previewPrefix);
     if (previewKeys.length) {
       const keysSet = new Set(keys);
       await Promise.all(
         previewKeys.map(async (key2) => {
-          const meta = await sourceStorage.getMeta(key2);
+          const meta = await source.getMeta(key2);
           if (meta?.__deleted) {
             keysSet.delete(key2.substring(previewPrefix.length));
           } else {
@@ -63,10 +82,8 @@ export function* chunksFromArray(arr, n) {
   }
 }
 
-
-let cachedContents = [];
+let cachedContents = []
 export const cleanCachedContents = () => {
-  console.log('cleanCachedContents');
   cachedContents = [];
 }
 
@@ -80,14 +97,13 @@ export const getContentsList = /* @__PURE__ */ (() => {
       const result = await Promise.all(chunk.map((key) => getContent(event, key)));
       contents.push(...result);
     }
-    return contents;
+    return contents.filter((c) => c && c._path);
   };
   return (event, prefix) => {
     if (event.context.__contentList) {
       return event.context.__contentList;
     }
     if ((isPrerendering || !isProduction) && cachedContents.length) {
-      console.log("using cached contents");
       return cachedContents;
     }
     if (!pendingContentsListPromise) {
@@ -109,19 +125,22 @@ export const getContent = async (event, id) => {
   if (!contentIgnorePredicate(id)) {
     return { _id: contentId, body: null };
   }
+  const source = sourceStorage();
+  const cache = cacheParsedStorage();
   if (isPreview(event)) {
     const { key } = getPreview(event);
     const previewId = `preview:${key}:${id}`;
-    const draft = await sourceStorage.getItem(previewId);
+    const draft = await source.getItem(previewId);
     if (draft) {
       id = previewId;
     }
   }
-  const cached = await cacheParsedStorage.getItem(id);
+  const cached = await cache.getItem(id);
   if (isProduction && cached) {
     return cached.parsed;
   }
-  const meta = await sourceStorage.getMeta(id);
+  const config = contentConfig();
+  const meta = await source.getMeta(id);
   const mtime = meta.mtime;
   const size = meta.size || 0;
   const hash = ohash({
@@ -130,20 +149,20 @@ export const getContent = async (event, id) => {
     // File size
     size,
     // Add Content version to the hash, to revalidate the cache on content update
-    version: contentConfig.cacheVersion,
-    integrity: contentConfig.cacheIntegrity
+    version: config.cacheVersion,
+    integrity: config.cacheIntegrity
   });
   if (cached?.hash === hash) {
     return cached.parsed;
   }
   if (!pendingPromises[id + hash]) {
     pendingPromises[id + hash] = new Promise(async (resolve) => {
-      const body = await sourceStorage.getItem(id);
+      const body = await source.getItem(id);
       if (body === null) {
         return resolve({ _id: contentId, body: null });
       }
       const parsed = await parseContent(contentId, body);
-      await cacheParsedStorage.setItem(id, { parsed, hash }).catch(() => {
+      await cache.setItem(id, { parsed, hash }).catch(() => {
       });
       resolve(parsed);
       delete pendingPromises[id + hash];
@@ -153,20 +172,21 @@ export const getContent = async (event, id) => {
 };
 export const parseContent = async (id, content, opts = {}) => {
   const nitroApp = useNitroApp();
+  const config = contentConfig();
   const options = defu(
     opts,
     {
       markdown: {
-        ...contentConfig.markdown,
-        highlight: contentConfig.highlight
+        ...config.markdown,
+        highlight: config.highlight
       },
-      csv: contentConfig.csv,
-      yaml: contentConfig.yaml,
+      csv: config.csv,
+      yaml: config.yaml,
       transformers: customTransformers,
       pathMeta: {
-        defaultLocale: contentConfig.defaultLocale,
-        locales: contentConfig.locales,
-        respectPathCase: contentConfig.respectPathCase
+        defaultLocale: config.defaultLocale,
+        locales: config.locales,
+        respectPathCase: config.respectPathCase
       }
     }
   );
@@ -181,6 +201,7 @@ export const createServerQueryFetch = (event) => (query) => {
 };
 export function serverQueryContent(event, query, ...pathParts) {
   const { advanceQuery } = useRuntimeConfig().public.content.experimental;
+  const config = contentConfig();
   const queryBuilder = advanceQuery ? createQuery(createServerQueryFetch(event), { initialParams: typeof query !== "string" ? query || {} : {}, legacy: false }) : createQuery(createServerQueryFetch(event), { initialParams: typeof query !== "string" ? query || {} : {}, legacy: true });
   let path;
   if (typeof query === "string") {
@@ -198,13 +219,19 @@ export function serverQueryContent(event, query, ...pathParts) {
       }
     }
     if (!params.sort?.length) {
-      params.sort = [{ _file: 1, $numeric: true }];
+      params.sort = [{ _stem: 1, $numeric: true }];
     }
-    if (contentConfig.locales.length) {
+    if (!import.meta.dev) {
+      params.where = params.where || [];
+      if (!params.where.find((item) => typeof item._draft !== "undefined")) {
+        params.where.push({ _draft: { $ne: true } });
+      }
+    }
+    if (config.locales.length) {
       const queryLocale = params.where?.find((w) => w._locale)?._locale;
       if (!queryLocale) {
         params.where = params.where || [];
-        params.where.push({ _locale: contentConfig.defaultLocale });
+        params.where.push({ _locale: config.defaultLocale });
       }
     }
     return params;
