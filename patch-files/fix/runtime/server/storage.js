@@ -14,7 +14,7 @@ export const sourceStorage = prefixStorage(useStorage(), "content:source");
 export const cacheStorage = prefixStorage(useStorage(), "cache:content");
 export const cacheParsedStorage = prefixStorage(useStorage(), "cache:content:parsed");
 const isProduction = process.env.NODE_ENV === "production";
-// const isPrerendering = import.meta.prerender;
+const isPrerendering = import.meta.prerender;
 const contentConfig = useRuntimeConfig().content;
 const isIgnored = makeIgnored(contentConfig.ignores);
 const invalidKeyCharacters = `'"?#/`.split("");
@@ -86,17 +86,16 @@ export const getContentsList = /* @__PURE__ */ (() => {
     if (event.context.__contentList) {
       return event.context.__contentList;
     }
-    // if (isPrerendering && cachedContents.length) {
-    if (cachedContents.length) {
+    if ((isPrerendering || !isProduction) && cachedContents.length) {
       console.log("using cached contents");
       return cachedContents;
     }
     if (!pendingContentsListPromise) {
       pendingContentsListPromise = _getContentsList(event, prefix);
       pendingContentsListPromise.then((result) => {
-        // if (isPrerendering) {
+        if (isPrerendering || !isProduction) {
           cachedContents = result;
-        // }
+        }
         event.context.__contentList = result;
         pendingContentsListPromise = null;
       });

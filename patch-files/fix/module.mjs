@@ -655,7 +655,9 @@ const module = defineNuxtModule({
       return;
     }
     addPlugin(resolveRuntimeModule("./plugins/ws"));
-    addServerPlugin(resolveRuntimeModule("./server/plugins/refresh-cache"));
+    if (nuxt.options.dev) {
+      addServerPlugin(resolveRuntimeModule("./server/plugins/refresh-cache"));
+    }
 
     nuxt.hook("nitro:init", async (nitro) => {
       if (!options.watch || !options.watch.ws) {
