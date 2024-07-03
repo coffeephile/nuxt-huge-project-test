@@ -461,9 +461,6 @@ const module = defineNuxtModule({
     } else {
       addImports({ name: "navigationDisabled", as: "fetchContentNavigation", from: resolveRuntimeModule("./composables/utils") });
     }
-    if (nuxt.options.dev) {
-      addServerPlugin(resolveRuntimeModule("./server/plugins/refresh-cache"));
-    }
     if (options.documentDriven) {
       const defaultDocumentDrivenConfig = {
         page: true,
@@ -491,6 +488,9 @@ const module = defineNuxtModule({
       addPlugin(resolveRuntimeModule(
         options.experimental.advanceQuery ? "./plugins/documentDriven" : "./legacy/plugins/documentDriven"
       ));
+      if (nuxt.options.dev) {
+        addServerPlugin(resolveRuntimeModule("./server/plugins/refresh-cache"));
+      }
       if (options.documentDriven.injectPage) {
         nuxt.options.pages = true;
         nuxt.hook("pages:extend", (pages) => {
